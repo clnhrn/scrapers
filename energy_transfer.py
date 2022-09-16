@@ -14,14 +14,36 @@ logger = logging.getLogger(__name__)
 
 
 class EnergyTransfer(PipelineScraper):
-    tsp = ['829416002', '007933047', '829521983']
-    tsp_name = ['Fayetteville Express Pipeline, LLC', 'Transwestern Pipeline Company, LLC', 'ETC Tiger Pipeline, LLC']
-    asset = ['FEP', 'TW', 'TGR']
-    source = 'feptransfer.energytransfer'
-    api_url = 'https://feptransfer.energytransfer.com/index.jsp'
-    post_url = 'https://feptransfer.energytransfer.com/ipost/{}/capacity/operationally-available'
-
-    download_csv_url = 'https://feptransfer.energytransfer.com/ipost/capacity/operationally-available'
+    parent_source = 'energytransfer'
+    tsp_list = [
+        {
+            'source': 'feptransfer.energytransfer',
+            'home_url': 'https://feptransfer.energytransfer.com/ipost/FEP/main/index',
+            'post_url': 'https://feptransfer.energytransfer.com/ipost/FEP/capacity/operationally-available',
+            'download_api': 'https://feptransfer.energytransfer.com/ipost/capacity/operationally-available',
+            'tsp_id': '829416002',
+            'tsp_name': 'Fayetteville Express Pipeline, LLC',
+            'asset': 'FEP'
+        },
+        {
+            'source': 'feptransfer.energytransfer',
+            'home_url': 'https://feptransfer.energytransfer.com/ipost/TW/main/index',
+            'post_url': 'https://feptransfer.energytransfer.com/ipost/TW/capacity/operationally-available',
+            'download_api': 'https://feptransfer.energytransfer.com/ipost/capacity/operationally-available',
+            'tsp_id': '007933047',
+            'tsp_name': 'Transwestern Pipeline Company, LLC',
+            'asset': 'TW'
+        },
+        {
+            'source': 'feptransfer.energytransfer',
+            'home_url': 'https://feptransfer.energytransfer.com/ipost/TGR/main/index',
+            'post_url': 'https://feptransfer.energytransfer.com/ipost/TGR/capacity/operationally-available',
+            'download_api': 'https://feptransfer.energytransfer.com/ipost/capacity/operationally-available',
+            'tsp_id': '829521983',
+            'tsp_name': 'ETC Tiger Pipeline, LLC',
+            'asset': 'TGR'
+        }
+    ]
 
     get_page_headers = {
         'Accept': 'text / html, application / xhtml + xml, application / xml; q = 0.9, image / avif, image / webp, image / apng, * / *;q = 0.8, application / signed - exchange; v = b3; q = 0.9',
@@ -80,75 +102,75 @@ class EnergyTransfer(PipelineScraper):
     }
 
     def __init__(self, job_id):
-        PipelineScraper.__init__(self, job_id, web_url=self.api_url, source=self.source)
+        PipelineScraper.__init__(self, job_id, web_url=self.tsp_list[0]['home_url'], source=self.parent_source)
 
-    def set_params(self, post_date: date = None):
+    def set_params(self, post_date: date = None, cycle: int = 0):
         if post_date is None:
             set_date = {'gasDay': date.today().strftime('%m/%d/%Y')}
         else:
             set_date = {'gasDay': post_date.strftime('%m/%d/%Y')}
         self.params.update(set_date)
 
+        set_cycle = {'cycle': str(cycle)}
+        self.params.update(set_cycle)
+
         return self.params
 
-    def set_payload(self, post_date: date = None):
+    def set_payload(self, post_date: date = None, cycle: int = 0):
         if post_date is None:
             set_date = {'gasDay': date.today().strftime('%m/%d/%Y')}
         else:
             set_date = {'gasDay': post_date.strftime('%m/%d/%Y')}
         self.payload.update(set_date)
 
+        set_cycle = {'cycle': str(cycle)}
+        self.payload.update(set_cycle)
+
         return self.payload
 
-    def set_cycle(self, cycle: int = None):
-        if cycle is None:
-            set_cyc = {'cycle': '5'}
-        else:
-            set_cyc = {'cycle': str(cycle)}
-        self.payload.update(set_cyc)
-        self.params.update(set_cyc)
-
-        return self.payload, self.params
-
-    def add_columns(self, df_data, sub_company, num, post_date: date = None):
-        payload = self.set_payload(post_date)
-        page_response = self.session.post(self.post_url.format(sub_company), headers=self.post_page_headers, data=payload)
+    def add_columns(self, df_data, tsp, post_date: date = None, cycle: int = 0):
+        payload = self.set_payload(post_date, cycle)
+        page_response = self.session.post(tsp['post_url'], headers=self.post_page_headers, data=payload)
         soup = BeautifulSoup(page_response.text, 'lxml')
+
         # text is not enclosed by tags, the closest identifier is class:pad.
         post_date_time = soup.find_all('p', {'class': 'pad'})[0].findChild('strong').nextSibling.text
         eff_gas_day_time = soup.find_all('p', {'class': 'pad'})[1].findChild('strong').nextSibling.text
         meas_basis = soup.find_all('p', {'class': 'pad'})[2].findChild('strong').nextSibling.text
-        df_data.insert(0, 'TSP', self.tsp[num], True)
-        df_data.insert(1, 'TSP Name', self.tsp_name[num], True)
+
+        df_data.insert(0, 'TSP', tsp['tsp_id'], True)
+        df_data.insert(1, 'TSP Name', tsp['tsp_name'], True)
         df_data.insert(2, 'Post Date/Time', post_date_time.strip(), True)
         df_data.insert(3, 'Effective Gas Day/Time', eff_gas_day_time.strip(), True)
         df_data.insert(4, 'Meas Basis Desc', meas_basis.strip(), True)
 
         return df_data
 
-    def start_scraping(self, cycle: int = None, post_date: date = None):
-        init_df = pd.DataFrame()
-        for index, asset in enumerate(self.asset):
+    def start_scraping(self, post_date: date = None, cycle: int = 0):
+        main_df = pd.DataFrame()
+        for tsp in self.tsp_list:
             try:
                 logger.info('Scraping %s pipeline gas for post date: %s', self.source, post_date)
-                company = {'asset': asset}
-                self.set_cycle(cycle)
+                company = {'asset': tsp['asset']}
                 self.params.update(company)
-                params = self.set_params(post_date)
-                response = self.session.get(self.download_csv_url, headers=self.get_page_headers, params=params)
+                params = self.set_params(post_date, cycle)
+
+                response = self.session.get(tsp['download_api'], headers=self.get_page_headers, params=params)
                 response.raise_for_status()
+
                 html_text = response.text
                 csv_data = StringIO(html_text)
+
                 df_result = pd.read_csv(csv_data)
-                final_report = self.add_columns(df_result, asset, index, post_date)
-                init_df = pd.concat([init_df, final_report])
-                logger.info('DF created for %s', asset)
+                final_report = self.add_columns(df_result, tsp, post_date, cycle)
+                main_df = pd.concat([main_df, final_report])
+                logger.info('DF created for %s', tsp['asset'])
 
             except Exception as ex:
                 logger.error(ex, exc_info=True)
 
-        self.save_result(init_df, post_date=post_date, local_file=True)
-        logger.info('File saved. end of scraping: %s', self.source)
+        self.save_result(main_df, post_date=post_date, local_file=True)
+        logger.info('File saved. end of scraping: %s', self.parent_source)
 
         return None
 
@@ -164,14 +186,19 @@ def back_fill_pipeline_date():
 def main():
     # set your own date to scrape. default is current date
     custom_date = date.fromisoformat('2022-08-30')
-    # set desired cycle: 0 = timely, 1 = evening, 3 = ID1, 4 = ID2, 7 = ID3.
-    # default value is 5 = final; csv file might be empty if cycle = 5 is not yet available.
+    # set desired cycle:
+    # 0 = Timely (Default)
+    # 1 = Evening,
+    # 3 = ID1,
+    # 4 = ID2,
+    # 7 = ID3.
+    # 5 = Final - csv file might be empty if not yet available.
     custom_cycle = 1
     scraper = EnergyTransfer(job_id=str(uuid.uuid4()))
-    # parameters are cycle, post_date
-    scraper.start_scraping(cycle=custom_cycle, post_date=custom_date)
+    scraper.start_scraping(post_date=custom_date, cycle=custom_cycle)
     scraper.scraper_info()
 
 
 if __name__ == '__main__':
     main()
+    
